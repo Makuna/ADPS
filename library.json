@@ -1,0 +1,19 @@
+{
+  "name": "ADPS",
+  "keywords": "ADPS1930",
+  "description": "A library that makes using and controlling ADPS99xx Digital Proximity and Ambient Light Sensor easy.  Supports most Arduino platforms, including both hardware I2C and software I2C.",
+  "homepage": "https://github.com/Makuna/ADPS/wiki",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Makuna/ADPS"
+  },
+  "version": "0.9.0",
+  "frameworks": "arduino",
+  "platforms": "*",
+  "dependencies": [
+    {
+      "name": "WIRE"
+    }
+  ]
+}
+

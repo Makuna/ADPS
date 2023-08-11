@@ -1,0 +1,29 @@
+#######################################
+# Syntax Coloring Map ADPS
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+Adps9930	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+Begin	KEYWORD2
+LastError	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+Wire_Error_None	LITERAL1
+Wire_Error_TxBufferOverflow	LITERAL1
+Wire_Error_NoAddressableDevice	LITERAL1
+Wire_Error_UnsupportedRequest	LITERAL1
+Wire_Error_Unspecific	LITERAL1
+Wire_Error_CommunicationTimeout	LITERAL1
+
+
