@@ -31,9 +31,7 @@ License along with Rtc.  If not, see
 namespace ADPS9960
 {
 
-
-
-template<class T_ADPS, uint8_t V_SAMPLE_DEPTH = 3> class GestureEngine
+template<class T_ADPS, uint8_t V_SAMPLE_DEPTH = 4> class GestureEngine
 {
 public:
     GestureEngine(uint32_t minTimeMs = 44, uint32_t holdTimeMs = 1000, uint32_t maxTimeMs = 1400) :
@@ -42,8 +40,9 @@ public:
         c_MaxGestureLengthMs(maxTimeMs),
         _state(State_None),
         _entryMs(0),
-        _queueEntry(V_SAMPLE_DEPTH),
-        _queueExit(V_SAMPLE_DEPTH)
+        _queueSamples(V_SAMPLE_DEPTH),
+        _xFirstClass(0),
+        _yFirstClass(0)
     {
     }
 
@@ -131,6 +130,27 @@ public:
         }
     }
 
+    void Poll(T_ADPS& adps, GestureCallback callback, uint32_t pollIntervalMs)
+    {
+        static uint32_t LastPollTime = 0;
+        uint32_t now = millis();
+        uint32_t delta = (now - LastPollTime);
+
+        if (delta >= pollIntervalMs)
+        {
+            LastPollTime = now;
+
+            GestureStatus gestureStatus = adps.GetGestureStatus();
+            if (adps.LastError() == WIRE_UTIL::Error_None)
+            {
+                if (gestureStatus.IsDataValid())
+                {
+                    Process(adps, callback);
+                }
+            }
+        }
+    }
+
 protected:
     enum State
     {
@@ -150,75 +170,30 @@ protected:
     uint8_t _state;
     uint32_t _entryMs;
     
-    CircularQueue<GestureData> _queueEntry;
-    CircularQueue<GestureData> _queueExit;
+    CircularQueue<GestureData> _queueSamples;
+    int8_t _xFirstClass;
+    int8_t _yFirstClass;
 
     void processGestureDataEnd(GestureCallback callback)
     {
         if (_state == State_Over_Last)
         {
             // we have collected enough to make an informed guess at the gesture
-            // first level classification into x/y
-            int8_t x = 0;
-            int8_t y = 0;
+            //
 
-            // include some from first gesture samples in the classification
-            for (size_t iQueue = 0; iQueue < _queueEntry.Count; iQueue++)
-            {
-                auto minmax = _queueEntry[iQueue].FindMinMax();
-                uint8_t importance = 1; // entry applies an interative importance
-
-                switch (minmax.MinIndex)
-                {
-                case GestureDirection_Up:
-                    y += importance;
-                    break;
-                case GestureDirection_Down:
-                    y -= importance;
-                    break;
-                case GestureDirection_Left:
-                    x -= importance;
-                    break;
-                case GestureDirection_Right:
-                    x += importance;
-                    break;
-                }
-            }
-
-            // include the last samples into the classification
-            for (size_t iQueue = 0; iQueue < _queueExit.Count; iQueue++)
-            {
-                auto minmax = _queueExit[iQueue].FindMinMax();
-                uint8_t importance = iQueue + 2; // importance increases toward last
-
-                switch (minmax.MinIndex)
-                {
-                case GestureDirection_Up:
-                    y -= importance;
-                    break;
-                case GestureDirection_Down:
-                    y += importance;
-                    break;
-                case GestureDirection_Left:
-                    x += importance;
-                    break;
-                case GestureDirection_Right:
-                    x -= importance;
-                    break;
-                }
-            }
+            updateExitFirstClassification();
 
             // second level classification and
             // convert into GestureVector for callback
             GestureVector gesture = GestureVector_Unknown;
             int8_t epsilon = 3;
-            int8_t absX = abs(x);
-            int8_t absY = abs(y);
+            int8_t absX = abs(_xFirstClass);
+            int8_t absY = abs(_yFirstClass);
 
             if (absY > absX + epsilon)
             {
                 // primarily vertical
-                if (y < 0)
+                if (_yFirstClass < 0)
                 {
                     gesture = GestureVector_Down;
                 }
@@ -230,7 +205,7 @@ protected:
             else if (absX > absY + epsilon)
             {
                 // primarily horizontal
-                if (x < 0)
+                if (_xFirstClass < 0)
                 {
                     gesture = GestureVector_Left;
                 }
@@ -258,19 +233,31 @@ protected:
                 Serial.println("[GBEGIN] ");
 #endif
                 _entryMs = processStartMs;
-                _queueEntry.Clear();
-                _queueExit.Clear();
+
+                // prepare queue for gesture entry samples
+                _queueSamples.Clear();
                 _state++;
             }
 
             if (_state <= State_Entry_Last)
             {
-                _queueEntry.Enqueue(data);
+                _queueSamples.Enqueue(data);
+                if (_state == State_Entry_Last)
+                {
+                    // reset first classification
+                    _xFirstClass = 0;
+                    _yFirstClass = 0;
+
+                    updateEntryFirstClassification();
+
+                    // prepare queue for gesture exit samples
+                    _queueSamples.Clear();
+                }
                 _state++;
             }
             else if (_state <= State_Over_Last)
             {
-                _queueExit.Enqueue(data);
+                _queueSamples.Enqueue(data);
                 if (_state < State_Over_Last)
                 {
                     _state++;
@@ -279,7 +266,59 @@ protected:
         }
     }
 
+    void updateEntryFirstClassification()
+    {
+        // include some from first gesture samples in the classification
+        for (size_t iQueue = 0; iQueue < _queueSamples.Count; iQueue++)
+        {
+            auto minmax = _queueSamples[iQueue].FindMinMax();
+            // importance decreases toward last
+            uint8_t importance = _queueSamples.Count - iQueue; 
 
+            switch (minmax.MinIndex)
+            {
+            case GestureDirection_Up:
+                _yFirstClass += importance;
+                break;
+            case GestureDirection_Down:
+                _yFirstClass -= importance;
+                break;
+            case GestureDirection_Left:
+                _xFirstClass -= importance;
+                break;
+            case GestureDirection_Right:
+                _xFirstClass += importance;
+                break;
+            }
+        }
+    }
+
+    void updateExitFirstClassification()
+    {
+        // include the last samples into the classification
+        for (size_t iQueue = 0; iQueue < _queueSamples.Count; iQueue++)
+        {
+            auto minmax = _queueSamples[iQueue].FindMinMax();
+            // importance increases toward last
+            uint8_t importance = iQueue + 2; 
+
+            switch (minmax.MinIndex)
+            {
+            case GestureDirection_Up:
+                _yFirstClass -= importance;
+                break;
+            case GestureDirection_Down:
+                _yFirstClass += importance;
+                break;
+            case GestureDirection_Left:
+                _xFirstClass += importance;
+                break;
+            case GestureDirection_Right:
+                _xFirstClass -= importance;
+                break;
+            }
+        }
+    }
 };
 
 }
