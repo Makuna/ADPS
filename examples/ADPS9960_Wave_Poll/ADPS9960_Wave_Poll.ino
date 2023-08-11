@@ -4,7 +4,6 @@
 // ADPS9960 SCL --> SCL
 // ADPS9960 VCC --> 3.3v
 // ADPS9960 GND --> GND
-// ADPS9960 INT --> (Pin19) Don't forget to pullup (4.7k to 10k to VCC)
 
 /* for software wire use below
 #include <SoftwareWire.h>  // must be included here so that Arduino library object file references work
@@ -29,37 +28,7 @@ GestureEngine<AdpsType> Gestures;
 
 /* for normal hardware wire use above */
 
-
-// AVR platform is restictive on pins that can be used for interrupts
-// Other platforms that less restrictions may only require the pin
-// 
-// Interrupt Pin Lookup Table
-// (copied from Arduino Docs)
-//
-// CAUTION:  The interrupts are Arduino numbers NOT Atmel numbers
-//   and may not match (example, Mega2560 int.4 is actually Atmel Int2)
-//   this is only an issue if you plan to use the lower level interupt features
-//
-// Board           int.0    int.1   int.2   int.3   int.4   int.5
-// ---------------------------------------------------------------
-// Uno, Ethernet    2       3
-// Mega2560         2       3       21      20     [19]      18 
-// Leonardo         3       2       0       1       7
-
-#define ThresholdIntPin 19 // Mega2560
-#define ThresholdInterrupt 4 // Mega2560
-
-// marked volatile so interrupt can safely modify it and
-// other code can safely read and modify them
-volatile bool interuptFlag = false;
-
-void ISR_ATTR InteruptServiceRoutine()
-{
-    // since this interupted any other running code,
-    // don't do anything that takes long and especially avoid
-    // any communications calls within this routine
-    interuptFlag = true;
-}
+constexpr uint32_t GesturePollIntervalMs = 66; // 66ms, 15 times a second 
 
 // handy routine to return true if there was an error
 // but it will also print out an error message with the given topic
@@ -114,9 +83,6 @@ void setup ()
 {
     Serial.begin(115200);
 
-    // set the interupt pin to input mode
-    pinMode(ThresholdIntPin, INPUT);
-
     //--------ADPS SETUP ------------
     // if you are using ESP-01 then uncomment the line below to reset the pins to
     // the available pins for SDA, SCL
@@ -160,18 +126,9 @@ void setup ()
     Adps.SetGesturePulseConfig();
     wasError("setup SetGesturePulseConfig");
 
-    // Gesture only, and enable gesture threshold interrupts
-    Adps.Start(Feature_Gesture, Feature_Gesture);
+    // Gesture only
+    Adps.Start(Feature_Gesture);
     wasError("setup Start");
-
-#if defined(ARDUINO_ARCH_AVR) || defined(ARDUINO_ARCH_MEGAAVR)
-    // setup external interupt 
-    // for some Arduino hardware they use interrupt number for the first param
-    attachInterrupt(ThresholdInterrupt, InteruptServiceRoutine, FALLING);
-#else
-    // for some Arduino hardware they use interrupt pin for the first param
-    attachInterrupt(ThresholdIntPin, InteruptServiceRoutine, FALLING);
-#endif
 
     Serial.println("Running...");
 }
@@ -208,14 +165,10 @@ void onGesture(GestureVector gesture)
     Serial.println();
 }
 
+
+
 void loop () 
 {
-    // handle the interrupt request
-    if (interuptFlag)
-    {
-        interuptFlag = false;
-
-        Gestures.Process(Adps, onGesture);
-        wasError("loop Gestures.Process");
-    }
+    Gestures.Poll(Adps, onGesture, GesturePollIntervalMs);
+    wasError("loop Gestures.Poll");
 }
